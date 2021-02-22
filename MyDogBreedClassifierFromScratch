@@ -1,0 +1,316 @@
+
+# In[11]:
+
+
+import os
+import torch
+import torchvision.models as models
+from torchvision import datasets
+import torchvision.transforms as transforms
+import matplotlib.pyplot as plt 
+import numpy as np
+from PIL import ImageFile, Image
+### TODO: Write data loaders for training, validation, and test sets
+## Specify appropriate transforms, and batch_sizes
+
+
+# load and transform data using ImageFolder
+# define training and test data directories
+data_dir = '/data/dog_images/'
+train_dir = os.path.join(data_dir, 'train/')
+test_dir = os.path.join(data_dir, 'test/')
+valid_dir = os.path.join(data_dir, 'valid/')
+
+# classes are folders in each directory with these names
+classes = [f.name for f in os.scandir(train_dir) if f.is_dir()]
+# print (classes)
+
+# VGG-16 Takes 224x224 images as input, so we resize all of them
+target_size = 224
+init_size = 250
+
+data_transform = transforms.Compose([transforms.Resize((init_size,init_size)), # Do not crop, but keep the full info
+                                     transforms.RandomHorizontalFlip(),
+                                     #transforms.RandomRotation(10),
+                                     transforms.RandomCrop(target_size), # crop form the center, because all images have some borders with no info
+                                     transforms.ToTensor(),
+                                     transforms.Normalize( mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],),])
+
+
+
+
+
+train_data = datasets.ImageFolder(train_dir, transform=data_transform)
+test_data = datasets.ImageFolder(test_dir, transform=data_transform)
+valid_data = datasets.ImageFolder(test_dir, transform=data_transform)
+# print out some data stats
+print('Num training images: ', len(train_data))
+print('Num test images: ', len(test_data))
+
+# define dataloader parameters
+batch_size = 20
+num_workers=0
+
+# prepare data loaders
+train_loader = torch.utils.data.DataLoader(train_data, batch_size=batch_size, 
+                                           num_workers=num_workers, shuffle=True)
+test_loader = torch.utils.data.DataLoader(test_data, batch_size=batch_size, 
+                                          num_workers=num_workers, shuffle=True)
+valid_loader = torch.utils.data.DataLoader(valid_data, batch_size=batch_size,
+                                          num_workers=num_workers, shuffle=True)
+
+# obtain one batch of training images
+dataiter = iter(train_loader)
+images, labels = dataiter.next()
+classes= train_data.classes
+images = images.numpy() # convert images to numpy for display
+
+# ONLY WORKS WITH NON-NORMALIZED IMAGES
+# plot the images in the batch, along with the corresponding labels
+fig = plt.figure(figsize=(25, 4))
+for idx in np.arange(batch_size):
+    unnormalizied_image = images[idx] / 2 + 0.5 
+    ax = fig.add_subplot(2, 20/2, idx+1, xticks=[], yticks=[])
+    plt.imshow(np.transpose(unnormalizied_image, (1, 2, 0)))
+    index = int(labels[idx])
+    ax.set_title(int(labels[idx]))
+    ax.set_title(classes[index])
+    
+    
+loaders_scratch = {'train': train_loader, 'valid': valid_loader, 'test':test_loader}
+
+
+
+
+
+import torch.nn as nn
+import torch.nn.functional as F
+
+# define the CNN architecture
+class Net(nn.Module):
+    ### TODO: choose an architecture, and complete the class
+    def __init__(self):
+        super(Net, self).__init__()
+        ## Define layers of a CNN
+        # Since very fine grained differences have to be learned we need some deep layers
+        
+        
+        conv1_out = 32
+        conv2_out = 64       
+        conv3_out = 128
+        # conv4_out = 256
+        
+        self.conv1 = nn.Conv2d(3,conv1_out,3, padding=1)
+        self.conv2 = nn.Conv2d(conv1_out,conv2_out,3, padding=1)
+        self.conv3 = nn.Conv2d(conv2_out,conv3_out,3, padding=1)
+        # self.conv4 = nn.Conv2d(conv3_out,conv4_out,3, padding=1)
+        self.pool  = nn.MaxPool2d(3,2)
+        self.dropout = nn.Dropout(0.3) # 0.2->0.3 brings improvement 6>7
+        self.fc1   = nn.Linear(93312,133)  
+        # self.fc2   = nn.Linear(2000,133) # Achived 7% w/o this layer and the 7% Architecture from above
+     
+       
+    
+    def forward(self, x):
+        ## Define forward behavior
+ 
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.pool(x) 
+        #x = self.dropout(x) #learning was to slow, so I removed the multiple dropouts except one at the end
+        
+        x = self.conv2(x) 
+        x = F.relu(x)
+        x = self.pool(x)
+        #x = self.dropout(x)
+        
+        x = self.conv3(x)
+        x = F.relu(x)
+        x = self.pool(x)
+        #x = self.dropout(x)
+    
+        #x = self.conv4(x)
+        #x = F.relu(x)
+        #x = self.pool(x)
+        #x = self.dropout(x)
+        
+        x = torch.reshape(x,(x.shape[0],-1))
+        x = self.dropout(x)
+        x = self.fc1(x)
+        x = F.sigmoid(x)
+        # I Achived 7% with one fully connected layer.
+  
+        #x = self.fc2(x)
+        #x = F.sigmoid(x)
+        
+        return x
+
+#-#-# You so NOT have to modify the code below this line. #-#-#
+
+# instantiate the CNN
+model_scratch = Net()
+print ("New model created")
+print(model_scratch)
+
+## complete this function
+def weights_init_normal(m):
+    '''Takes in a module and initializes all linear layers with weight
+       values taken from a normal distribution.'''
+    classname = m.__class__.__name__
+    # for every Linear layer in a model
+    # m.weight.data shoud be taken from a normal distribution
+    # m.bias.data should be 0
+    if classname.find('Linear') != -1:
+        # get the number of the inputs
+        n = m.in_features
+        y = 1.0/np.sqrt(n)
+        m.weight.data.normal_(-y, y)
+        # m.bias.data.fill_(0)
+        print (m)
+
+print ('Initialize initial weights...')
+model_scratch.apply(weights_init_normal)
+# move tensors to GPU if CUDA is available
+if use_cuda:
+    model_scratch.cuda()
+
+
+# __Question 4:__ Outline the steps you took to get to your final CNN architecture and your reasoning at each step.  
+
+# __Answer:__ 
+# I started using a net with 4 conv layers, with drop out layers between each layer. The final layer used 256 filters, which is more or less the double of the resuling classes. Then I used one fully connected layer to map to the 133 classes.  The idea was, that the dog breeds are partially so similar, that they can be distinguished only by very fine grained patterns in the pictures. I achived a 6-7% accuracy. But after about 30 epochs learning stucked. I tried different optimizers and learing rates, but could not get bettern the 7%.
+# Then I used the architecture with 2 fully connected layers. To keep the time for training reasonably short, I removed the largest conv layer. I used a normal distribution to initialize the weights an the same learning rate that achived my 7% result in the first try. 
+# I the first run I observed decrease of the loss in the area of 0.00001-0.0001 much to low, so I tried the Adams optimizer instead of the SDG an that increased the learing reduction of loss in the range of 0.003. 
+
+# ### (IMPLEMENTATION) Specify Loss Function and Optimizer
+# 
+# Use the next code cell to specify a [loss function](http://pytorch.org/docs/stable/nn.html#loss-functions) and [optimizer](http://pytorch.org/docs/stable/optim.html).  Save the chosen loss function as `criterion_scratch`, and the optimizer as `optimizer_scratch` below.
+
+# In[17]:
+
+
+import torch.optim as optim
+
+### TODO: select loss function
+criterion_scratch = nn.CrossEntropyLoss()
+
+### TODO: select optimizer
+optimizer_scratch = optim.SGD(model_scratch.parameters(), lr=0.01) # 0,01 > 7%
+#optimizer_scratch=optim.Adam(model_scratch.parameters(), lr=0.01)
+
+
+# ### (IMPLEMENTATION) Train and Validate the Model
+# 
+# Train and validate your model in the code cell below.  [Save the final model parameters](http://pytorch.org/docs/master/notes/serialization.html) at filepath `'model_scratch.pt'`.
+
+# In[18]:
+
+
+def train(n_epochs, loaders, model, optimizer, criterion, use_cuda, save_path):
+    """returns trained model"""
+    # initialize tracker for minimum validation loss
+    valid_loss_min = np.Inf 
+    
+    for epoch in range(1, n_epochs+1):
+        # initialize variables to monitor training and validation loss
+        train_loss = 0.0
+        valid_loss = 0.0
+        
+        ###################
+        # train the model #
+        ###################
+        model.train()
+        for batch_idx, (data, target) in enumerate(loaders['train']):
+            # move to GPU
+            if use_cuda:
+                data, target = data.cuda(), target.cuda()
+            ## find the loss and update the model parameters accordingly
+            ## record the average training loss, using something like
+            ## train_loss = train_loss + ((1 / (batch_idx + 1)) * (loss.data - train_loss))
+           
+        
+            #######################################
+            # MY CODE 
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
+    
+            # clear the gradients of all optimized variables
+            optimizer.zero_grad()
+            # forward pass: compute predicted outputs by passing inputs to the model
+            output = model(data)
+            # calculate the batch loss
+            loss = criterion(output, target)
+            
+            # backward pass: compute gradient of the loss with respect to model parameters
+            loss.backward()
+            # perform a single optimization step (parameter update)
+            optimizer.step()
+            # update training loss
+        
+            train_loss = train_loss + ((1 / (batch_idx + 1)) * (loss.data - train_loss))
+        
+            # MY CODE 
+            #######################################
+            
+        
+    
+    
+    
+        ######################    
+        # validate the model #
+        ######################
+        model.eval()
+        for batch_idx, (data, target) in enumerate(loaders['valid']):
+            # move to GPU
+            if use_cuda:
+                data, target = data.cuda(), target.cuda()
+            ## update the average validation loss
+          
+            #######################################
+            # MY CODE 
+            output = model(data)
+            # calculate the batch loss
+            loss = criterion(output, target)
+            # update average validation loss 
+            valid_loss = valid_loss + ((1 / (batch_idx + 1)) * (loss.data - valid_loss))
+            # calculate average losses
+        
+        #train_loss = train_loss/len(train_loader.dataset)
+        #valid_loss = valid_loss/len(valid_loader.dataset)
+        
+            # print training/validation statistics 
+        print('Epoch: {} \tTraining Loss: {:.6f} \tValidation Loss: {:.6f}'.format(epoch, train_loss, valid_loss))
+        
+            # save model if validation loss has decreased
+        if valid_loss <= valid_loss_min:
+            print('Validation loss decreased ({:.6f} --> {:.6f}).  Saving model ...'.format(
+                valid_loss_min,
+                valid_loss))
+            torch.save(model.state_dict(), save_path)
+            valid_loss_min = valid_loss
+            
+            # MY CODE 
+            #######################################
+            
+     
+        
+        ## TODO: save the model if validation loss has decreased
+            
+    # return trained model
+    return model
+
+# Reload model to continue training
+#model_scratch.load_state_dict(torch.load('model_scratch.pt'))
+import workspace_utils
+
+with workspace_utils.active_session():
+# train the model
+#model_scratch = train(100, loaders_scratch, model_scratch, optimizer_scratch, 
+ #                     criterion_scratch, use_cuda, 'model_scratch.pt')
+    model_scratch = train(50, loaders_scratch, model_scratch, optimizer_scratch, 
+                                 criterion_scratch, use_cuda, 'model_scratch.pt')
+
+
+
+# load the model that got the best validation accuracy
+    model_scratch.load_state_dict(torch.load('model_scratch.pt'))
+
